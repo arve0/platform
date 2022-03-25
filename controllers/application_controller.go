@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,6 +77,11 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if app.Status.Phase == platformv1.ApplicationPhaseBuilding {
 		logr.Info("waiting for build to finish")
 		return r.waitForBuild(ctx, app)
+	}
+
+	if app.Status.Phase == platformv1.ApplicationPhaseBuildingDone {
+		logr.Info("creating deployment")
+		return r.createDeployment(ctx, app)
 	}
 
 	return ctrl.Result{}, nil
@@ -141,6 +147,62 @@ func (r *ApplicationReconciler) waitForBuild(ctx context.Context, app *platformv
 	}
 
 	app.Status.Phase = platformv1.ApplicationPhaseBuildingDone
+	err = r.Status().Update(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *ApplicationReconciler) createDeployment(ctx context.Context, app *platformv1.Application) (ctrl.Result, error) {
+	deployment := appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": app.Name,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": app.Name,
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:            app.Name,
+						Image:           fmt.Sprintf("registry.apps.arve.dev/%s:%s", app.Name, app.Spec.Repository.Revision),
+						ImagePullPolicy: corev1.PullAlways,
+						Env: []corev1.EnvVar{{
+							Name:  "PORT",
+							Value: "8080",
+						}},
+						Ports: []corev1.ContainerPort{{
+							Name:          "http",
+							ContainerPort: 8080,
+						}},
+					}},
+				},
+			},
+		},
+	}
+
+	err := ctrl.SetControllerReference(app, &deployment, r.Scheme)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	err = r.Create(ctx, &deployment)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	app.Status.Phase = platformv1.ApplicationPhaseCreatedDeployment
 	err = r.Status().Update(ctx, app)
 	if err != nil {
 		return ctrl.Result{}, err
