@@ -6,4 +6,14 @@ plugins:
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: platform
 repo: github.com/arve0/platform
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: arve.dev
+  group: platform
+  kind: Application
+  path: github.com/arve0/platform/api/v1
+  version: v1
 version: "3"

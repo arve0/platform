@@ -1,0 +1,8 @@
+apiVersion: platform.arve.dev/v1
+kind: Application
+metadata:
+  name: some-server
+spec:
+  repository:
+    url: git://github.com/arve0/some-server
+    revision: master
