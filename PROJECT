@@ -1,0 +1,9 @@
+domain: arve.dev
+layout:
+- go.kubebuilder.io/v3
+plugins:
+  manifests.sdk.operatorframework.io/v2: {}
+  scorecard.sdk.operatorframework.io/v2: {}
+projectName: platform
+repo: github.com/arve0/platform
+version: "3"
