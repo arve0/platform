@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -82,6 +83,11 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if app.Status.Phase == platformv1.ApplicationPhaseBuildingDone {
 		logr.Info("creating deployment")
 		return r.createDeployment(ctx, app)
+	}
+
+	if app.Status.Phase == platformv1.ApplicationPhaseCreatedDeployment {
+		logr.Info("creating service")
+		return r.createService(ctx, app)
 	}
 
 	return ctrl.Result{}, nil
@@ -203,6 +209,44 @@ func (r *ApplicationReconciler) createDeployment(ctx context.Context, app *platf
 	}
 
 	app.Status.Phase = platformv1.ApplicationPhaseCreatedDeployment
+	err = r.Status().Update(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *ApplicationReconciler) createService(ctx context.Context, app *platformv1.Application) (ctrl.Result, error) {
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": app.Name,
+			},
+			Ports: []corev1.ServicePort{{
+				Name:       "http",
+				Protocol:   "TCP",
+				Port:       80,
+				TargetPort: intstr.FromString("http"),
+			}},
+		},
+	}
+
+	err := ctrl.SetControllerReference(app, &service, r.Scheme)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	err = r.Create(ctx, &service)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	app.Status.Phase = platformv1.ApplicationPhaseCreatedService
 	err = r.Status().Update(ctx, app)
 	if err != nil {
 		return ctrl.Result{}, err
