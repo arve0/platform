@@ -19,11 +19,13 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -71,13 +73,18 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.build(ctx, app)
 	}
 
+	if app.Status.Phase == platformv1.ApplicationPhaseBuilding {
+		logr.Info("waiting for build to finish")
+		return r.waitForBuild(ctx, app)
+	}
+
 	return ctrl.Result{}, nil
 }
 
 func (r *ApplicationReconciler) build(ctx context.Context, app *platformv1.Application) (ctrl.Result, error) {
 	builder := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("builder-%s", app.Name),
+			Name:      getBuilderName(app),
 			Namespace: app.Namespace,
 		},
 		Spec: corev1.PodSpec{
@@ -105,6 +112,35 @@ func (r *ApplicationReconciler) build(ctx context.Context, app *platformv1.Appli
 	}
 
 	app.Status.Phase = platformv1.ApplicationPhaseBuilding
+	err = r.Status().Update(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func getBuilderName(app *platformv1.Application) string {
+	return fmt.Sprintf("builder-%s", app.Name)
+}
+
+func (r *ApplicationReconciler) waitForBuild(ctx context.Context, app *platformv1.Application) (ctrl.Result, error) {
+	builderName := types.NamespacedName{
+		Name:      getBuilderName(app),
+		Namespace: app.Namespace,
+	}
+
+	builder := corev1.Pod{}
+	err := r.Get(ctx, builderName, &builder)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if builder.Status.Phase != corev1.PodSucceeded {
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+
+	app.Status.Phase = platformv1.ApplicationPhaseBuildingDone
 	err = r.Status().Update(ctx, app)
 	if err != nil {
 		return ctrl.Result{}, err
