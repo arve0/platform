@@ -23,6 +23,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -88,6 +89,11 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if app.Status.Phase == platformv1.ApplicationPhaseCreatedDeployment {
 		logr.Info("creating service")
 		return r.createService(ctx, app)
+	}
+
+	if app.Status.Phase == platformv1.ApplicationPhaseCreatedService {
+		logr.Info("creating ingress")
+		return r.createIngress(ctx, app)
 	}
 
 	return ctrl.Result{}, nil
@@ -253,6 +259,72 @@ func (r *ApplicationReconciler) createService(ctx context.Context, app *platform
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *ApplicationReconciler) createIngress(ctx context.Context, app *platformv1.Application) (ctrl.Result, error) {
+	ingress := networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+			Annotations: map[string]string{
+				"cert-manager.io/cluster-issuer": "letsencrypt",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: String("nginx"),
+			Rules: []networkingv1.IngressRule{{
+				Host: fmt.Sprintf("%s.apps.arve.dev", app.Name),
+				IngressRuleValue: networkingv1.IngressRuleValue{
+					HTTP: &networkingv1.HTTPIngressRuleValue{
+						Paths: []networkingv1.HTTPIngressPath{{
+							Path:     "/",
+							PathType: PathType(networkingv1.PathTypePrefix),
+							Backend: networkingv1.IngressBackend{
+								Service: &networkingv1.IngressServiceBackend{
+									Name: app.Name,
+									Port: networkingv1.ServiceBackendPort{
+										Name: "http",
+									},
+								},
+							},
+						}},
+					},
+				},
+			}},
+			TLS: []networkingv1.IngressTLS{{
+				Hosts: []string{
+					fmt.Sprintf("%s.apps.arve.dev", app.Name),
+				},
+				SecretName: fmt.Sprintf("%s-tls", app.Name),
+			}},
+		},
+	}
+
+	err := ctrl.SetControllerReference(app, &ingress, r.Scheme)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	err = r.Create(ctx, &ingress)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	app.Status.Phase = platformv1.ApplicationPhaseDeployed
+	err = r.Status().Update(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func String(s string) *string {
+	return &s
+}
+
+func PathType(p networkingv1.PathType) *networkingv1.PathType {
+	return &p
 }
 
 // SetupWithManager sets up the controller with the Manager.
