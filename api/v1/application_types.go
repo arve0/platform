@@ -40,7 +40,17 @@ type Repository struct {
 type ApplicationStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	Phase ApplicationPhase `json:"phase"`
 }
+
+type ApplicationPhase string
+
+const ApplicationPhaseCreated = ""
+const ApplicationPhaseBuilding = "building"
+const ApplicationPhaseBuildingDone = "building-done"
+const ApplicationPhaseCreatedDeployment = "deployment-created"
+const ApplicationPhaseCreatedService = "service-created"
+const ApplicationPhaseDeployed = "deployed"
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status

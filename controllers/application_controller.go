@@ -18,8 +18,11 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,7 +66,49 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// TODO(user): your logic here
+	if app.Status.Phase == platformv1.ApplicationPhaseCreated {
+		logr.Info("build")
+		return r.build(ctx, app)
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *ApplicationReconciler) build(ctx context.Context, app *platformv1.Application) (ctrl.Result, error) {
+	builder := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("builder-%s", app.Name),
+			Namespace: app.Namespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name:  "builder",
+				Image: "gcr.io/kaniko-project/executor",
+				Args: []string{
+					fmt.Sprintf("--context=%s#refs/heads/%s", app.Spec.Repository.URL, app.Spec.Repository.Revision),
+					fmt.Sprintf("--destination=registry.internal/%s:%s", app.Name, app.Spec.Repository.Revision),
+					"--insecure-registry=registry.internal",
+				},
+			}},
+		},
+	}
+
+	err := ctrl.SetControllerReference(app, &builder, r.Scheme)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	err = r.Create(ctx, &builder)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	app.Status.Phase = platformv1.ApplicationPhaseBuilding
+	err = r.Status().Update(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
