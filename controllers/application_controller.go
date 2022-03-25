@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,6 +52,16 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logr := log.Log
 
 	logr.Info("reconcile")
+
+	app := &platformv1.Application{}
+	err := r.Get(ctx, req.NamespacedName, app)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logr.Info("deleted")
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
 
 	// TODO(user): your logic here
 

@@ -231,3 +231,9 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+delete:
+	kubectl delete -f config/samples/platform_v1_application.yaml
+
+sample:
+	kubectl create -f config/samples/platform_v1_application.yaml
